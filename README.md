@@ -17,6 +17,10 @@ Points = your auto-filled cells minus your clicked cells. When the hive is full,
 and score nothing, but they count as filled, so they help set off chains. If the scattered grays already surround an
 empty cell, that cell turns gray too, and so on, before anyone plays. Online, the host picks the number in the room.
 
+**🍂 Falling hive**: an option on both setup screens. Every time the turn goes from the bottom of the list back to the top
+(after the last player's turn), the outer ring of the hive falls off. Fallen cells are gone: they can't be played, they don't
+count as neighbors, and any points on them are lost. The game ends when no empty cells are left.
+
 ## Playing
 
 - **Play on this device**: pick 1 to 4 players and type names if you like (blank ones are called Player 1, Player 2…), then take turns on the same screen.

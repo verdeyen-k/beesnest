@@ -1,6 +1,8 @@
 // Bees Nest: take turns filling hex cells. Any empty cell touching 3 or more filled cells fills itself, and
 // those can set off more. Cells that fill themselves belong to whoever's click set them off.
 // Points = cells you auto-filled minus cells you clicked. When the board is full, the most points wins.
+// Falling hive: each time the turn goes from the last player back to the first, the outer ring falls off,
+// along with any points on it.
 (() => {
   // ── Board ────────────────────────────────────────────────────────────────
   // A hexagon with N cells per side, pointy-top cells, axial (q, r) coordinates.
@@ -10,6 +12,8 @@
     idx.set(q + ',' + r, cells.length); cells.push({ q, r });
   }
   const DIRS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+  // Which ring each cell is in: 0 is the middle, R is the outside.
+  const ring = cells.map(c => Math.max(Math.abs(c.q), Math.abs(c.r), Math.abs(c.q + c.r)));
   const nbrs = cells.map(c => DIRS.map(([dq, dr]) => idx.get((c.q + dq) + ',' + (c.r + dr))).filter(i => i !== undefined));
 
   // Each player clicks in their first color, and their auto-fills come out in the second.
@@ -22,6 +26,8 @@
   const MAX_PLAYERS = PLAYERS.length;
   // Gray cells are scattered at the start. They belong to nobody, but count as filled for the 3-neighbor rule.
   const GRAY = PLAYERS.length, GRAY_COLOR = '#8e948f', MAX_GRAYS = 100;
+  // Cells that fell off in a falling hive: gone, so they're neither empty nor filled.
+  const FALLEN = -2;
   function scatter(n) {
     const pool = cells.map((_, i) => i), out = [];
     for (let k = 0; k < Math.min(n, MAX_GRAYS); k++) out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
@@ -29,14 +35,14 @@
   }
 
   // Fill every empty cell with 3+ filled neighbors, wave by wave, giving them to player p.
-  // owner[i] is the player who owns cell i, or -1 if it's empty. Calls onFill(i, wave) for each new cell.
+  // owner[i] is the player who owns cell i, -1 if it's empty, or FALLEN. Calls onFill(i, wave) for each new cell.
   function spread(owner, p, onFill) {
     let wave = 0;
     for (;;) {
       const add = [];
       for (let i = 0; i < cells.length; i++) {
         if (owner[i] !== -1) continue;
-        let k = 0; for (const j of nbrs[i]) if (owner[j] !== -1) k++;
+        let k = 0; for (const j of nbrs[i]) if (owner[j] >= 0) k++;
         if (k >= 3) add.push(i);
       }
       if (!add.length) return wave;
@@ -46,25 +52,33 @@
   }
 
   // Rebuild the board from the gray cells and the list of moves. Every device does this, so they all agree.
+  // A move is { p, c } (player p filled cell c), or { f: 1 } when the outer ring falls.
   function replay(moves, grays = []) {
     const owner = new Array(cells.length).fill(-1), seed = new Array(cells.length).fill(false);
     const wave = new Array(cells.length).fill(0), move = new Array(cells.length).fill(-1);
+    let last = -1, outer = R;
     // Grays can set off their own chain before anyone plays; those cells are gray too.
     for (const i of grays) owner[i] = GRAY;
     spread(owner, GRAY);
     moves.forEach((m, k) => {
+      if (m.f) {
+        cells.forEach((_, i) => { if (ring[i] === outer) { owner[i] = FALLEN; move[i] = k; } });
+        outer--;
+        return;
+      }
+      last = k;
       owner[m.c] = m.p; seed[m.c] = true; move[m.c] = k;
       spread(owner, m.p, (i, w) => { wave[i] = w; move[i] = k; });
     });
     const score = PLAYERS.map(() => ({ seeds: 0, autos: 0, points: 0 }));
     owner.forEach((p, i) => { if (p >= 0 && p !== GRAY) seed[i] ? score[p].seeds++ : score[p].autos++; });
     for (const s of score) s.points = s.autos - s.seeds;
-    return { owner, seed, wave, move, score, full: owner.every(p => p !== -1) };
+    return { owner, seed, wave, move, last, outer, score, full: owner.every(p => p !== -1) };
   }
 
   // ── Online rooms ─────────────────────────────────────────────────────────
   // Bump with the ?v= on the script in index.html whenever what goes in the room changes.
-  const VERSION = 2;
+  const VERSION = 4;
   const OUTDATED = 'That room is using a different version of Bees Nest. Everyone needs to refresh the page.';
   const ROOMS = 'beesnest/rooms';
 
@@ -134,6 +148,7 @@
       await ref.set({
         host: myId, v: VERSION, created: firebase.database.ServerValue.TIMESTAMP, phase: 'lobby',
         grayCount: Math.max(0, Math.min(MAX_GRAYS, Number(store.get('beesnest-grays')) || 0)),
+        falling: store.get('beesnest-falling') === '1',
         players: { [myId]: { name, slot: 0 } },
       });
       ref.onDisconnect().remove();
@@ -212,7 +227,7 @@
     room.ref.update({ phase: 'play', order: playerList(st).map(p => p.id), turn: 0, moves: null, grays: scatter(st.grayCount || 0) });
   }
   function playAgain() {
-    if (room && room.local) { startLocal(playerList(room.st).map(p => p.name), room.st.grayCount); return; }
+    if (room && room.local) { startLocal(playerList(room.st).map(p => p.name), room.st.grayCount, room.st.falling); return; }
     if (room && room.st && room.st.host === myId) room.ref.update({ phase: 'lobby', order: null, turn: null, moves: null, grays: null });
   }
 
@@ -225,9 +240,14 @@
     const grays = toArr(cur.grays);
     if (replay(moves, grays).owner[c] !== -1) return false;
     moves.push({ p: cur.players[id].slot, c });
+    if (!replay(moves, grays).full) {
+      const next = nextTurn(cur, cur.turn);
+      // Back to the top of the list: in a falling hive, the outer ring falls.
+      if (cur.falling && next <= cur.turn) moves.push({ f: 1 });
+      cur.turn = next;
+    }
     cur.moves = moves;
     if (replay(moves, grays).full) cur.phase = 'over';
-    else cur.turn = nextTurn(cur, cur.turn);
     return true;
   }
 
@@ -239,12 +259,12 @@
   }
 
   // Everyone on one device: the same room state, kept here instead of online, and whoever's turn it is plays.
-  function startLocal(names, grayCount) {
+  function startLocal(names, grayCount, falling) {
     leaveRoom();
     const players = {};
     names.forEach((name, slot) => { players['p' + slot] = { name, slot }; });
     room = { local: true, st: { phase: 'play', players, order: names.map((_, slot) => 'p' + slot), turn: 0, moves: [],
-      grayCount, grays: scatter(grayCount) } };
+      grayCount, grays: scatter(grayCount), falling } };
     resetBoard();
     render();
   }
@@ -310,15 +330,17 @@
     $('hint').textContent = '';
   }
 
+  const colorOf = (b, i) => { const o = b.owner[i]; return o < 0 ? '' : o === GRAY ? GRAY_COLOR : b.seed[i] ? PLAYERS[o].seed : PLAYERS[o].auto; };
   function drawBoard() {
     cells.forEach((c, i) => {
       const p = polys[i], o = board.owner[i];
-      const color = o < 0 ? '' : o === GRAY ? GRAY_COLOR : board.seed[i] ? PLAYERS[o].seed : PLAYERS[o].auto;
+      const color = colorOf(board, i);
       p.style.fill = color; p.style.stroke = color;
       p.classList.toggle('filled', o >= 0);
-      p.classList.toggle('last', board.move[i] === shownMoves - 1 && board.seed[i]);
+      p.classList.toggle('fallen', o === FALLEN);
+      p.classList.toggle('last', board.move[i] === board.last && board.seed[i] && o >= 0);
       dots[i].style.display = o >= 0 && board.seed[i] ? '' : 'none';
-      p.setAttribute('aria-label', `Cell ${c.q},${c.r}: ${o < 0 ? 'empty' : o === GRAY ? 'gray' : `${PLAYERS[o].label} ${board.seed[i] ? 'clicked' : 'auto-filled'}`}`);
+      p.setAttribute('aria-label', `Cell ${c.q},${c.r}: ${o === FALLEN ? 'fallen' : o < 0 ? 'empty' : o === GRAY ? 'gray' : `${PLAYERS[o].label} ${board.seed[i] ? 'clicked' : 'auto-filled'}`}`);
     });
   }
 
@@ -345,6 +367,8 @@
       const g = $('grays');
       g.disabled = !host;
       if (document.activeElement !== g) g.value = st.grayCount || 0;
+      $('falling').disabled = !host;
+      $('falling').checked = !!st.falling;
       return;
     }
 
@@ -357,9 +381,17 @@
     shownMoves = moves.length;
     if (selected !== null && board.owner[selected] !== -1) selected = null;
     drawBoard();
+    const lastWave = Math.max(0, ...board.wave.filter((_, i) => board.move[i] >= fresh));
     cells.forEach((_, i) => {
-      if (before.owner[i] === -1 && board.owner[i] !== -1 && board.move[i] >= fresh) {
-        const p = polys[i];
+      const p = polys[i];
+      if (board.owner[i] === FALLEN && before.owner[i] !== FALLEN) {
+        // Falls once the cascade that came before it has popped in.
+        p.classList.remove('pop', 'drop'); void p.getBBox();
+        p.style.fill = p.style.stroke = colorOf(before, i);
+        p.style.animationDelay = (lastWave * 90 + 350 + ((i * 37) % 9) * 40) + 'ms';
+        p.classList.add('drop');
+        dots[i].style.display = 'none';
+      } else if (before.owner[i] === -1 && board.owner[i] >= 0 && board.move[i] >= fresh) {
         p.classList.remove('pop'); void p.getBBox();
         p.style.animationDelay = (board.wave[i] * 90) + 'ms';
         p.classList.add('pop');
@@ -374,7 +406,7 @@
     const turnP = st.players[turnId];
     const banner = $('turn');
     if (st.phase === 'over') {
-      banner.textContent = 'Board full!';
+      banner.textContent = st.falling ? 'Game over!' : 'Board full!';
       banner.style.background = '';
     } else if (turnId === myId && !local) {
       banner.textContent = 'Your turn';
@@ -386,7 +418,7 @@
     banner.classList.toggle('mine', (local || turnId === myId) && st.phase === 'play');
 
     // Everyone who played this game, even if they've since left, so their cells still add up.
-    const inGame = [...new Set(moves.map(m => m.p).concat(players.map(p => p.slot)))].sort();
+    const inGame = [...new Set(moves.filter(m => !m.f).map(m => m.p).concat(players.map(p => p.slot)))].sort();
     const nameOf = slot => { const p = players.find(p => p.slot === slot); return p ? p.name : `${PLAYERS[slot].label} (left)`; };
     const rows = inGame.map(slot => ({ slot, name: nameOf(slot), ...board.score[slot] }));
     $('scores').innerHTML = rows.map(r => `<tr class="${turnP && turnP.slot === r.slot && st.phase === 'play' ? 'now' : ''}">
@@ -394,6 +426,12 @@
       <td class="num">${r.autos}</td><td class="num">${r.seeds ? '−' + r.seeds : 0}</td><td class="num pts">${r.points}</td></tr>`).join('');
     const empty = board.owner.filter(o => o === -1).length;
     $('left').textContent = `${empty} empty cell${empty === 1 ? '' : 's'} left`;
+    // In a falling hive, say whose turn ends the round and drops the outer ring.
+    if (st.falling && st.phase === 'play' && board.outer >= 0) {
+      const lastId = order.slice().reverse().find(id => st.players[id]);
+      const lastP = lastId && st.players[lastId];
+      if (lastP) $('left').textContent += ` · 🍂 outer ring falls after ${lastId === myId && !local ? 'your' : `${lastP.name}'s`} turn`;
+    }
 
     // Final results.
     $('over').hidden = st.phase !== 'over';
@@ -433,6 +471,13 @@
   const grayInput = el => Math.max(0, Math.min(MAX_GRAYS, Math.round(Number(el.value)) || 0));
   for (const id of ['local-grays', 'grays']) $(id).max = MAX_GRAYS;
   $('local-grays').value = Number(store.get('beesnest-grays')) || 0;
+  // Falling hive: the same two places.
+  $('local-falling').checked = store.get('beesnest-falling') === '1';
+  $('local-falling').onchange = () => store.set('beesnest-falling', $('local-falling').checked ? '1' : '0');
+  $('falling').onchange = () => {
+    store.set('beesnest-falling', $('falling').checked ? '1' : '0');
+    if (room && !room.local && room.st && room.st.host === myId) room.ref.update({ falling: $('falling').checked });
+  };
   $('grays').onchange = () => {
     const n = grayInput($('grays'));
     $('grays').value = n;
@@ -459,7 +504,7 @@
     const grays = grayInput($('local-grays'));
     $('local-grays').value = grays;
     store.set('beesnest-grays', grays);
-    startLocal(inputs.slice(0, localCount).map((x, i) => x.value.trim().slice(0, 16) || PLAYERS[i].label), grays);
+    startLocal(inputs.slice(0, localCount).map((x, i) => x.value.trim().slice(0, 16) || PLAYERS[i].label), grays, $('local-falling').checked);
   };
   $('again').onclick = playAgain;
   for (const id of ['lobby-leave', 'game-leave', 'over-leave']) $(id).onclick = () => { leaveRoom(); show('menu'); };
