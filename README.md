@@ -13,10 +13,6 @@ more in a chain. Cells that fill themselves belong to whoever's click set them o
 
 Points = your auto-filled cells minus your clicked cells. When the hive is full, the most points wins.
 
-**🐝🐝 Double Bee** (2 players): player 1 is orange and player 2 is blue. The cell you click goes to your *opponent*,
-but every cell it sets off is yours. Whoever has the most cells when the hive is full wins. Pick the mode on the
-"Play on this device" setup, or in the online room (host).
-
 **Gray hexes**: before starting, you can pick a number of gray hexes (up to 100) to scatter at random. They belong to nobody
 and score nothing, but they count as filled, so they help set off chains. If the scattered grays already surround an
 empty cell, that cell turns gray too, and so on, before anyone plays. Online, the host picks the number in the room.

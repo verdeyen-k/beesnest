@@ -1,8 +1,6 @@
 // Bees Nest: take turns filling hex cells. Any empty cell touching 3 or more filled cells fills itself, and
 // those can set off more. Cells that fill themselves belong to whoever's click set them off.
 // Points = cells you auto-filled minus cells you clicked. When the board is full, the most points wins.
-// Double Bee is a 2-player mode: the cell you click goes to your opponent, and the cells it sets off are yours.
-// Whoever has the most cells when the board is full wins.
 (() => {
   // ── Board ────────────────────────────────────────────────────────────────
   // A hexagon with N cells per side, pointy-top cells, axial (q, r) coordinates.
@@ -22,13 +20,6 @@
     { label: 'Player 4', seed: '#e85aa8', auto: '#1f6b3a', seedName: 'pink',   autoName: 'dark green' },
   ];
   const MAX_PLAYERS = PLAYERS.length;
-  // In Double Bee each player has one color: player 1 is orange and player 2 is blue.
-  const DOUBLE = [
-    { label: 'Player 1', seed: '#f08a24', auto: '#f08a24', name: 'orange' },
-    { label: 'Player 2', seed: '#2f5fd0', auto: '#2f5fd0', name: 'blue' },
-  ];
-  // Colors for player p: their slot in Classic, their place in the turn order in Double Bee.
-  const look = (mode, p) => mode === 'double' ? DOUBLE[p] : PLAYERS[p];
   // Gray cells are scattered at the start. They belong to nobody, but count as filled for the 3-neighbor rule.
   const GRAY = PLAYERS.length, GRAY_COLOR = '#8e948f', MAX_GRAYS = 100;
   function scatter(n) {
@@ -55,26 +46,25 @@
   }
 
   // Rebuild the board from the gray cells and the list of moves. Every device does this, so they all agree.
-  function replay(moves, grays = [], mode = 'classic') {
+  function replay(moves, grays = []) {
     const owner = new Array(cells.length).fill(-1), seed = new Array(cells.length).fill(false);
     const wave = new Array(cells.length).fill(0), move = new Array(cells.length).fill(-1);
     // Grays can set off their own chain before anyone plays; those cells are gray too.
     for (const i of grays) owner[i] = GRAY;
     spread(owner, GRAY);
     moves.forEach((m, k) => {
-      owner[m.c] = mode === 'double' ? 1 - m.p : m.p; seed[m.c] = true; move[m.c] = k;
+      owner[m.c] = m.p; seed[m.c] = true; move[m.c] = k;
       spread(owner, m.p, (i, w) => { wave[i] = w; move[i] = k; });
     });
     const score = PLAYERS.map(() => ({ seeds: 0, autos: 0, points: 0 }));
     owner.forEach((p, i) => { if (p >= 0 && p !== GRAY) seed[i] ? score[p].seeds++ : score[p].autos++; });
-    // In Double Bee, a player's seeds are the cells their opponent clicked, and every cell they own counts.
-    for (const s of score) s.points = mode === 'double' ? s.autos + s.seeds : s.autos - s.seeds;
+    for (const s of score) s.points = s.autos - s.seeds;
     return { owner, seed, wave, move, score, full: owner.every(p => p !== -1) };
   }
 
   // ── Online rooms ─────────────────────────────────────────────────────────
   // Bump with the ?v= on the script in index.html whenever what goes in the room changes.
-  const VERSION = 3;
+  const VERSION = 2;
   const OUTDATED = 'That room is using a different version of Bees Nest. Everyone needs to refresh the page.';
   const ROOMS = 'beesnest/rooms';
 
@@ -115,8 +105,6 @@
     }
     return t;
   }
-  // Which player a person is in the moves: their slot in Classic, their place in the turn order in Double Bee.
-  const seatOf = (st, id) => st.mode === 'double' ? toArr(st.order).indexOf(id) : st.players[id].slot;
 
   function genCode() {
     const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -146,7 +134,6 @@
       await ref.set({
         host: myId, v: VERSION, created: firebase.database.ServerValue.TIMESTAMP, phase: 'lobby',
         grayCount: Math.max(0, Math.min(MAX_GRAYS, Number(store.get('beesnest-grays')) || 0)),
-        mode: store.get('beesnest-mode') === 'double' ? 'double' : 'classic',
         players: { [myId]: { name, slot: 0 } },
       });
       ref.onDisconnect().remove();
@@ -166,8 +153,7 @@
       const st = await enterRoom(code, ref, true);
       const problem = !st || !st.host ? `There's no room ${code}.` : st.v !== VERSION ? OUTDATED
         : st.phase !== 'lobby' ? 'That game has already started.'
-        : playerList(st).length >= MAX_PLAYERS ? `That room is full (${MAX_PLAYERS} players).`
-        : st.mode === 'double' && playerList(st).length >= 2 ? 'That room is playing Double Bee, which is for 2 players, and it already has 2.' : null;
+        : playerList(st).length >= MAX_PLAYERS ? `That room is full (${MAX_PLAYERS} players).` : null;
       if (problem) throw new Error(problem);
       // A transaction, so two people joining at once can't take the same seat.
       const res = await ref.child('players').transaction(cur => {
@@ -223,11 +209,10 @@
   function startGame() {
     const st = room && room.st;
     if (!st || st.host !== myId) return;
-    if (st.mode === 'double' && playerList(st).length !== 2) return;
     room.ref.update({ phase: 'play', order: playerList(st).map(p => p.id), turn: 0, moves: null, grays: scatter(st.grayCount || 0) });
   }
   function playAgain() {
-    if (room && room.local) { startLocal(playerList(room.st).map(p => p.name), room.st.grayCount, room.st.mode); return; }
+    if (room && room.local) { startLocal(playerList(room.st).map(p => p.name), room.st.grayCount); return; }
     if (room && room.st && room.st.host === myId) room.ref.update({ phase: 'lobby', order: null, turn: null, moves: null, grays: null });
   }
 
@@ -238,10 +223,10 @@
     if (order[cur.turn] !== id || !cur.players || !cur.players[id]) return false;
     const moves = toArr(cur.moves);
     const grays = toArr(cur.grays);
-    if (replay(moves, grays, cur.mode).owner[c] !== -1) return false;
-    moves.push({ p: seatOf(cur, id), c });
+    if (replay(moves, grays).owner[c] !== -1) return false;
+    moves.push({ p: cur.players[id].slot, c });
     cur.moves = moves;
-    if (replay(moves, grays, cur.mode).full) cur.phase = 'over';
+    if (replay(moves, grays).full) cur.phase = 'over';
     else cur.turn = nextTurn(cur, cur.turn);
     return true;
   }
@@ -254,12 +239,12 @@
   }
 
   // Everyone on one device: the same room state, kept here instead of online, and whoever's turn it is plays.
-  function startLocal(names, grayCount, mode) {
+  function startLocal(names, grayCount) {
     leaveRoom();
     const players = {};
     names.forEach((name, slot) => { players['p' + slot] = { name, slot }; });
     room = { local: true, st: { phase: 'play', players, order: names.map((_, slot) => 'p' + slot), turn: 0, moves: [],
-      grayCount, grays: scatter(grayCount), mode } };
+      grayCount, grays: scatter(grayCount) } };
     resetBoard();
     render();
   }
@@ -296,8 +281,7 @@
     const st = room && room.st;
     return !!st && st.phase === 'play' && toArr(st.order)[st.turn] === meId();
   };
-  const mySeat = () => { const st = room && room.st; return st && st.players && st.players[meId()] ? seatOf(st, meId()) : 0; };
-  const mode = () => (room && room.st && room.st.mode) || 'classic';
+  const mySlot = () => { const p = room && room.st && room.st.players && room.st.players[meId()]; return p ? p.slot : 0; };
 
   // Mouse: hover shows what a click would set off, and a click places. Touch: the first tap shows it, the second places.
   function tap(i, type) {
@@ -311,21 +295,15 @@
   function preview(i) {
     clearPreview();
     if (board.owner[i] !== -1 || !myTurn()) return;
-    const me = mySeat(), double = mode() === 'double', clickOwner = double ? 1 - me : me;
-    const owner = board.owner.slice(); owner[i] = clickOwner;
-    const color = look(mode(), me).auto;
+    const owner = board.owner.slice(); owner[i] = mySlot();
+    const color = PLAYERS[mySlot()].auto;
     let n = 0;
-    spread(owner, me, j => { polys[j].classList.add('hint'); polys[j].style.setProperty('--hint', color); n++; });
-    polys[i].classList.add('picked'); polys[i].style.setProperty('--hint', look(mode(), clickOwner).seed);
-    const cellsText = `${n} cell${n === 1 ? '' : 's'}`;
-    if (double) {
-      $('hint').textContent = `The cell you click goes to ${look('double', clickOwner).name}. Sets off ${cellsText} for you.`;
-    } else {
-      // Clicking costs 1 point and each cell it sets off earns 1.
-      const gain = n - 1;
-      $('hint').textContent = `Sets off ${cellsText}: ${gain >= 0 ? '+' : '−'}${Math.abs(gain)} point${Math.abs(gain) === 1 ? '' : 's'} for you.`;
-    }
-    if (selected === i) $('hint').textContent += ' Tap again to place.';
+    spread(owner, mySlot(), j => { polys[j].classList.add('hint'); polys[j].style.setProperty('--hint', color); n++; });
+    polys[i].classList.add('picked'); polys[i].style.setProperty('--hint', PLAYERS[mySlot()].seed);
+    // Clicking costs 1 point and each cell it sets off earns 1.
+    const gain = n - 1;
+    $('hint').textContent = `Sets off ${n} cell${n === 1 ? '' : 's'}: ${gain >= 0 ? '+' : '−'}${Math.abs(gain)} point${Math.abs(gain) === 1 ? '' : 's'} for you.`
+      + (selected === i ? ' Tap again to place.' : '');
   }
   function clearPreview() {
     for (const p of polys) p.classList.remove('hint', 'picked');
@@ -335,18 +313,17 @@
   function drawBoard() {
     cells.forEach((c, i) => {
       const p = polys[i], o = board.owner[i];
-      const color = o < 0 ? '' : o === GRAY ? GRAY_COLOR : board.seed[i] ? look(mode(), o).seed : look(mode(), o).auto;
+      const color = o < 0 ? '' : o === GRAY ? GRAY_COLOR : board.seed[i] ? PLAYERS[o].seed : PLAYERS[o].auto;
       p.style.fill = color; p.style.stroke = color;
       p.classList.toggle('filled', o >= 0);
       p.classList.toggle('last', board.move[i] === shownMoves - 1 && board.seed[i]);
       dots[i].style.display = o >= 0 && board.seed[i] ? '' : 'none';
-      p.setAttribute('aria-label', `Cell ${c.q},${c.r}: ${o < 0 ? 'empty' : o === GRAY ? 'gray' : `${look(mode(), o).label} ${board.seed[i] ? 'clicked' : 'auto-filled'}`}`);
+      p.setAttribute('aria-label', `Cell ${c.q},${c.r}: ${o < 0 ? 'empty' : o === GRAY ? 'gray' : `${PLAYERS[o].label} ${board.seed[i] ? 'clicked' : 'auto-filled'}`}`);
     });
   }
 
   // ── Screens ──────────────────────────────────────────────────────────────
-  const swatches = (p, m = 'classic') => m === 'double' ? `<span class="sw" style="background:${DOUBLE[p].seed}"></span>`
-    : `<span class="sw" style="background:${PLAYERS[p].seed}"></span><span class="sw" style="background:${PLAYERS[p].auto}"></span>`;
+  const swatches = slot => `<span class="sw" style="background:${PLAYERS[slot].seed}"></span><span class="sw" style="background:${PLAYERS[slot].auto}"></span>`;
 
   function render() {
     const st = room && room.st;
@@ -354,23 +331,16 @@
     const local = !!room.local;
     if (!local && (!st || !st.host)) { leaveRoom(); show('menu'); $('menu-error').textContent = 'The host left, so the room closed.'; return; }
     if (!local && (!st.players || !st.players[myId])) { leaveRoom(); show('menu'); $('menu-error').textContent = 'You left the room.'; return; }
-    const players = playerList(st), host = local || st.host === myId, m = st.mode || 'classic', double = m === 'double';
+    const players = playerList(st), host = local || st.host === myId;
 
     if (st.phase === 'lobby') {
       if (shownMoves) resetBoard();
       show('lobby');
       $('code').textContent = room.code;
-      // In Double Bee the first two players in the list are orange and blue.
-      $('lobby-players').innerHTML = players.map((p, k) => {
-        const seat = double ? k : p.slot, ok = !double || k < 2;
-        return `<li>${ok ? swatches(seat, m) : ''}<span class="pname">${esc(p.name)}</span>
-        <span class="muted">${ok ? (double ? DOUBLE[seat].name : PLAYERS[seat].label) : 'no seat in Double Bee'}${p.id === st.host ? ' · host' : ''}${p.id === myId ? ' · you' : ''}</span></li>`;
-      }).join('');
-      for (const b of document.querySelectorAll('#mode button')) { b.setAttribute('aria-pressed', b.dataset.mode === m); b.disabled = !host; }
+      $('lobby-players').innerHTML = players.map(p => `<li>${swatches(p.slot)}<span class="pname">${esc(p.name)}</span>
+        <span class="muted">${PLAYERS[p.slot].label}${p.id === st.host ? ' · host' : ''}${p.id === myId ? ' · you' : ''}</span></li>`).join('');
       $('start').hidden = !host;
-      $('start').disabled = double && players.length !== 2;
-      $('start').textContent = double ? (players.length === 2 ? 'Start Double Bee' : 'Double Bee needs exactly 2 players')
-        : players.length > 1 ? `Start (${players.length} players)` : 'Start (just you)';
+      $('start').textContent = players.length > 1 ? `Start (${players.length} players)` : 'Start (just you)';
       $('lobby-wait').hidden = host;
       const g = $('grays');
       g.disabled = !host;
@@ -381,7 +351,7 @@
     // Playing or finished: rebuild the board from the moves, and pop in whatever changed since last time.
     const moves = toArr(st.moves);
     const before = board;
-    board = replay(moves, toArr(st.grays), m);
+    board = replay(moves, toArr(st.grays));
     if (moves.length < shownMoves) shownMoves = 0;
     const fresh = shownMoves;
     shownMoves = moves.length;
@@ -402,31 +372,26 @@
     $('game-code').textContent = room.code || '';
     const order = toArr(st.order), turnId = order[st.turn];
     const turnP = st.players[turnId];
-    const turnSeat = turnP ? seatOf(st, turnId) : -1;
     const banner = $('turn');
     if (st.phase === 'over') {
       banner.textContent = 'Board full!';
       banner.style.background = '';
     } else if (turnId === myId && !local) {
       banner.textContent = 'Your turn';
-      banner.style.background = look(m, turnSeat).seed;
+      banner.style.background = PLAYERS[turnP.slot].seed;
     } else {
       banner.textContent = turnP ? `${turnP.name}'s turn` : 'Waiting…';
-      banner.style.background = turnP ? look(m, turnSeat).seed : '';
+      banner.style.background = turnP ? PLAYERS[turnP.slot].seed : '';
     }
     banner.classList.toggle('mine', (local || turnId === myId) && st.phase === 'play');
 
     // Everyone who played this game, even if they've since left, so their cells still add up.
-    const order2 = toArr(st.order);
-    const seats = double ? [0, 1] : [...new Set(moves.map(mv => mv.p).concat(players.map(p => p.slot)))].sort();
-    const idOf = seat => double ? order2[seat] : (players.find(p => p.slot === seat) || {}).id;
-    const nameOf = seat => { const p = st.players[idOf(seat)]; return p ? p.name : `${look(m, seat).label} (left)`; };
-    const rows = seats.map(seat => ({ seat, name: nameOf(seat), ...board.score[seat] }));
-    $('score-head').innerHTML = double ? '<th>Player</th><th>auto</th><th>from clicks</th><th>cells</th>'
-      : '<th>Player</th><th>auto</th><th>clicked</th><th>points</th>';
-    $('scores').innerHTML = rows.map(r => `<tr class="${turnSeat === r.seat && st.phase === 'play' ? 'now' : ''}">
-      <td>${swatches(r.seat, m)}<span class="pname">${esc(r.name)}</span>${!local && idOf(r.seat) === myId ? ' <span class="muted">(you)</span>' : ''}</td>
-      <td class="num">${r.autos}</td><td class="num">${double ? r.seeds : r.seeds ? '−' + r.seeds : 0}</td><td class="num pts">${r.points}</td></tr>`).join('');
+    const inGame = [...new Set(moves.map(m => m.p).concat(players.map(p => p.slot)))].sort();
+    const nameOf = slot => { const p = players.find(p => p.slot === slot); return p ? p.name : `${PLAYERS[slot].label} (left)`; };
+    const rows = inGame.map(slot => ({ slot, name: nameOf(slot), ...board.score[slot] }));
+    $('scores').innerHTML = rows.map(r => `<tr class="${turnP && turnP.slot === r.slot && st.phase === 'play' ? 'now' : ''}">
+      <td>${swatches(r.slot)}<span class="pname">${esc(r.name)}</span>${!local && players.find(p => p.slot === r.slot && p.id === myId) ? ' <span class="muted">(you)</span>' : ''}</td>
+      <td class="num">${r.autos}</td><td class="num">${r.seeds ? '−' + r.seeds : 0}</td><td class="num pts">${r.points}</td></tr>`).join('');
     const empty = board.owner.filter(o => o === -1).length;
     $('left').textContent = `${empty} empty cell${empty === 1 ? '' : 's'} left`;
 
@@ -436,9 +401,8 @@
       const ranked = rows.slice().sort((a, b) => b.points - a.points);
       const best = ranked[0].points, winners = ranked.filter(r => r.points === best);
       $('winner').textContent = winners.length > 1 ? `Tie: ${winners.map(w => w.name).join(' & ')}!` : `${winners[0].name} wins!`;
-      $('final').innerHTML = ranked.map(r => `<li>${swatches(r.seat, m)}<span class="pname">${esc(r.name)}</span>
-        <span class="muted">${double ? `${r.autos} auto + ${r.seeds} from ${esc(nameOf(1 - r.seat))}'s clicks =` : `${r.autos} auto − ${r.seeds} clicked =`}</span>
-        <b>${r.points}</b>${double ? ' cells' : ''}</li>`).join('');
+      $('final').innerHTML = ranked.map(r => `<li>${swatches(r.slot)}<span class="pname">${esc(r.name)}</span>
+        <span class="muted">${r.autos} auto − ${r.seeds} clicked =</span> <b>${r.points}</b></li>`).join('');
       $('again').hidden = !host;
       $('again-wait').hidden = host;
     }
@@ -464,10 +428,6 @@
   };
   $('join-code').addEventListener('keydown', e => { if (e.key === 'Enter') $('join').click(); });
   $('start').onclick = startGame;
-  for (const b of document.querySelectorAll('#mode button')) b.onclick = () => {
-    store.set('beesnest-mode', b.dataset.mode);
-    if (room && !room.local && room.st && room.st.host === myId) room.ref.update({ mode: b.dataset.mode });
-  };
 
   // How many gray cells to scatter: one number for this device, and one the host sets for an online room.
   const grayInput = el => Math.max(0, Math.min(MAX_GRAYS, Math.round(Number(el.value)) || 0));
@@ -484,22 +444,12 @@
   let localCount = Math.min(MAX_PLAYERS, Math.max(1, Number(store.get('beesnest-local-count')) || 2));
   const savedNames = (() => { try { return JSON.parse(store.get('beesnest-local-names')) || []; } catch { return []; } })();
   $('local-names').innerHTML = PLAYERS.map((p, i) => `<div class="row local-name" data-i="${i}">
-    <span class="sws"></span>
+    <span class="sw" style="background:${p.seed}"></span><span class="sw" style="background:${p.auto}"></span>
     <input type="text" maxlength="16" placeholder="${p.label}" aria-label="${p.label} name" value="${esc(savedNames[i] || '')}"></div>`).join('');
-  // Double Bee is always 2 players, in orange and blue.
-  let localMode = store.get('beesnest-mode') === 'double' ? 'double' : 'classic';
-  const localPlayers = () => localMode === 'double' ? 2 : localCount;
   function drawLocalCount() {
     for (const b of document.querySelectorAll('#local-count button')) b.setAttribute('aria-pressed', Number(b.dataset.n) === localCount);
-    for (const b of document.querySelectorAll('#local-mode button')) b.setAttribute('aria-pressed', b.dataset.mode === localMode);
-    $('local-count-row').hidden = localMode === 'double';
-    for (const row of document.querySelectorAll('.local-name')) {
-      const i = Number(row.dataset.i);
-      row.hidden = i >= localPlayers();
-      row.querySelector('.sws').innerHTML = swatches(i < 2 || localMode === 'classic' ? i : 0, localMode);
-    }
+    for (const row of document.querySelectorAll('.local-name')) row.hidden = Number(row.dataset.i) >= localCount;
   }
-  for (const b of document.querySelectorAll('#local-mode button')) b.onclick = () => { localMode = b.dataset.mode; store.set('beesnest-mode', localMode); drawLocalCount(); };
   $('local-count').innerHTML = PLAYERS.map((_, i) => `<button type="button" data-n="${i + 1}">${i + 1}</button>`).join('');
   for (const b of document.querySelectorAll('#local-count button')) b.onclick = () => { localCount = Number(b.dataset.n); store.set('beesnest-local-count', localCount); drawLocalCount(); };
   drawLocalCount();
@@ -509,7 +459,7 @@
     const grays = grayInput($('local-grays'));
     $('local-grays').value = grays;
     store.set('beesnest-grays', grays);
-    startLocal(inputs.slice(0, localPlayers()).map((x, i) => x.value.trim().slice(0, 16) || PLAYERS[i].label), grays, localMode);
+    startLocal(inputs.slice(0, localCount).map((x, i) => x.value.trim().slice(0, 16) || PLAYERS[i].label), grays);
   };
   $('again').onclick = playAgain;
   for (const id of ['lobby-leave', 'game-leave', 'over-leave']) $(id).onclick = () => { leaveRoom(); show('menu'); };
