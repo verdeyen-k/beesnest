@@ -41,6 +41,7 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .seg button{min-width:44px}
 .seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .names{display:flex;flex-direction:column;gap:8px}
+.sws{display:inline-flex;align-items:center;min-width:22px}
 .names input{flex:1;max-width:260px}
 .error{color:#c43c3c;min-height:1.5em;font-size:14px}
 ul.plain{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
@@ -97,12 +98,16 @@ svg{display:block;width:100%;height:auto;touch-action:manipulation;user-select:n
   <div class="card">
     <h2>Points</h2>
     <p>Your points = cells that filled themselves for you, minus cells you clicked. When the hive is full, whoever has the most points wins.</p>
+    <p><b>🐝🐝 Double Bee</b> (2 players): player 1 is <b style="color:#f08a24">orange</b>, player 2 is <b style="color:#2f5fd0">blue</b>.
+      The cell you click goes to your opponent, but every cell it sets off is yours. Whoever has the most cells when the hive is full wins.</p>
     <p class="muted">You can also scatter gray hexes at the start. They belong to nobody, but they count as filled, so they help set off chains.</p>
     <ul class="plain" id="pairs"></ul>
   </div>
   <div class="card">
     <h2>Play on this device</h2>
-    <div class="row"><span>Players</span><span class="row seg" id="local-count"></span></div>
+    <div class="row"><span>Mode</span><span class="row seg" id="local-mode">
+      <button type="button" data-mode="classic">Classic</button><button type="button" data-mode="double">🐝🐝 Double Bee</button></span></div>
+    <div class="row" id="local-count-row"><span>Players</span><span class="row seg" id="local-count"></span></div>
     <div id="local-names" class="names"></div>
     <div class="row"><span class="sw gray"></span><label for="local-grays">Gray hexes to scatter</label><input type="number" id="local-grays" min="0" value="0" inputmode="numeric"></div>
     <div class="row"><button class="big" id="local-start" type="button">Start</button></div>
@@ -127,6 +132,8 @@ svg{display:block;width:100%;height:auto;touch-action:manipulation;user-select:n
     <ul class="plain" id="lobby-players"></ul>
   </div>
   <div class="card">
+    <div class="row"><span>Mode</span><span class="row seg" id="mode">
+      <button type="button" data-mode="classic">Classic</button><button type="button" data-mode="double">🐝🐝 Double Bee</button></span></div>
     <div class="row"><span class="sw gray"></span><label for="grays">Gray hexes to scatter</label><input type="number" id="grays" min="0" value="0" inputmode="numeric"></div>
     <p class="muted">Gray hexes are placed at random when the game starts. They belong to nobody, but they count as filled, so they help set off chains.</p>
   </div>
@@ -146,7 +153,7 @@ svg{display:block;width:100%;height:auto;touch-action:manipulation;user-select:n
     <button id="game-leave" type="button">Leave</button>
   </div>
   <table>
-    <thead><tr><th>Player</th><th>auto</th><th>clicked</th><th>points</th></tr></thead>
+    <thead><tr id="score-head"><th>Player</th><th>auto</th><th>clicked</th><th>points</th></tr></thead>
     <tbody id="scores"></tbody>
   </table>
   <div class="board"><svg id="svg" role="grid" aria-label="Hive"></svg></div>
@@ -169,6 +176,6 @@ svg{display:block;width:100%;height:auto;touch-action:manipulation;user-select:n
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
-<script src="beesnest.js?v=3"></script>
+<script src="beesnest.js?v=4"></script>
 </body>
 </html>
