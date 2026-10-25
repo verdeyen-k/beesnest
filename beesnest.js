@@ -338,6 +338,8 @@
       p.style.fill = color; p.style.stroke = color;
       p.classList.toggle('filled', o >= 0);
       p.classList.toggle('fallen', o === FALLEN);
+      // The drop animation leaves a cell invisible, so clear it off cells that are back in play (a new game).
+      if (o !== FALLEN) p.classList.remove('drop');
       p.classList.toggle('last', board.move[i] === board.last && board.seed[i] && o >= 0);
       dots[i].style.display = o >= 0 && board.seed[i] ? '' : 'none';
       p.setAttribute('aria-label', `Cell ${c.q},${c.r}: ${o === FALLEN ? 'fallen' : o < 0 ? 'empty' : o === GRAY ? 'gray' : `${PLAYERS[o].label} ${board.seed[i] ? 'clicked' : 'auto-filled'}`}`);
