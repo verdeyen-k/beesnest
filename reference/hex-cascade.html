@@ -1,0 +1,183 @@
+<title>Hex Cascade</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one centered board column; a slim stat strip above, controls below. */
+:root{
+  --bg:#eef0ec; --panel:#e2e6df; --line:#b9c0b4; --ink:#1f2622; --muted:#5d675f;
+  --seed:#24365c; --auto:#d08a2c; --empty:#f8f9f6; --hint:#d08a2c;
+  --display:"Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#161a18; --panel:#1f2522; --line:#3a433d; --ink:#e7ebe6; --muted:#97a29a;
+  --seed:#8fa8dc; --auto:#e2a14a; --empty:#232a26; --hint:#e2a14a; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#161a18; --panel:#1f2522; --line:#3a433d; --ink:#e7ebe6; --muted:#97a29a;
+  --seed:#8fa8dc; --auto:#e2a14a; --empty:#232a26; --hint:#e2a14a; color-scheme:dark }
+
+body{background:var(--bg);color:var(--ink);font-family:var(--display)}
+.wrap{max-width:900px;margin:0 auto;padding-block:28px 40px;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+  display:flex;flex-direction:column;gap:18px}
+header{display:flex;flex-direction:column;gap:6px}
+h1{font-size:clamp(28px,6vw,40px);font-weight:700;margin:0;letter-spacing:-.02em;text-wrap:balance}
+.rule{color:var(--muted);font-size:15px;line-height:1.5;margin:0;max-width:60ch}
+.stats{display:flex;flex-wrap:wrap;gap:8px 22px;font-family:var(--mono);font-size:13px;color:var(--muted);
+  font-variant-numeric:tabular-nums}
+.stats b{color:var(--ink);font-weight:500;font-size:15px}
+.key{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:0}
+.board{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px}
+svg{display:block;width:100%;height:auto;touch-action:manipulation;user-select:none}
+.cell{cursor:pointer;stroke:var(--line);stroke-width:1.2;fill:var(--empty);
+  transition:fill .18s ease, transform .18s ease;transform-box:fill-box;transform-origin:center}
+.cell:hover{stroke:var(--ink)}
+.cell.seed{fill:var(--seed);stroke:var(--seed)}
+.cell.auto{fill:var(--auto);stroke:var(--auto);cursor:not-allowed}
+.cell.pop{animation:pop .32s ease both}
+.cell.hint{stroke:var(--hint);stroke-width:2.4;stroke-dasharray:4 3}
+.cell.nope{animation:nope .3s ease}
+.cell:focus-visible{outline:none;stroke:var(--ink);stroke-width:3}
+.gen{font-family:var(--mono);font-size:9px;fill:var(--bg);pointer-events:none;text-anchor:middle;dominant-baseline:central}
+@keyframes pop{0%{transform:scale(.55)}70%{transform:scale(1.08)}100%{transform:scale(1)}}
+@keyframes nope{25%{transform:translateX(-2px)}75%{transform:translateX(2px)}}
+@media (prefers-reduced-motion: reduce){ .cell.pop,.cell.nope{animation:none} .cell{transition:none} }
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+button{font:500 14px var(--display);background:var(--bg);color:var(--ink);border:1px solid var(--line);
+  border-radius:8px;padding:8px 14px;cursor:pointer}
+button:hover{border-color:var(--ink)}
+button:focus-visible{outline:2px solid var(--seed);outline-offset:2px}
+label.tog{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--muted);cursor:pointer;margin-left:auto}
+.note{font-size:13px;color:var(--muted);margin:0;line-height:1.5}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Hex Cascade</h1>
+    <p class="rule">A hexagon with 10 cells per side, 271 cells in all. Click a cell to fill it. Any empty cell touching 3 or more filled cells fills itself, and that can set off a chain.</p>
+  </header>
+
+  <div class="stats" aria-live="polite">
+    <span><b id="sFill">0</b> / 271 filled</span>
+    <span><span class="key" style="background:var(--seed)"></span><b id="sSeed">0</b> clicked</span>
+    <span><span class="key" style="background:var(--auto)"></span><b id="sAuto">0</b> auto</span>
+    <span><b id="sGen">0</b> cascade waves</span>
+  </div>
+
+  <div class="board"><svg id="svg" role="grid" aria-label="Hex grid"></svg></div>
+
+  <div class="controls">
+    <button id="clear" type="button">Clear</button>
+    <button id="undo" type="button">Undo</button>
+    <button id="rand" type="button">Random 25</button>
+    <label class="tog"><input type="checkbox" id="showGen"> Show wave numbers</label>
+  </div>
+  <p class="note">Hover an empty cell to see what clicking it would set off (dashed outline). Click a filled cell you placed to clear it; anything that only filled because of it clears too. Auto-filled cells can't be clicked off directly.</p>
+</div>
+
+<script>
+const N = 10, R = N - 1, SIZE = 22, SQ3 = Math.sqrt(3);
+const cells = [], idx = new Map();
+for (let q=-R;q<=R;q++) for (let r=Math.max(-R,-q-R); r<=Math.min(R,-q+R); r++){
+  idx.set(q+","+r, cells.length); cells.push({q,r});
+}
+const DIRS = [[1,0],[1,-1],[0,-1],[-1,0],[-1,1],[0,1]];
+const nbrs = cells.map(c => DIRS.map(([dq,dr]) => idx.get((c.q+dq)+","+(c.r+dr))).filter(i => i!==undefined));
+
+let seeds = new Set(), history = [], gen = new Array(cells.length).fill(-1), prevGen = gen.slice();
+
+function closure(seedSet){
+  const g = new Array(cells.length).fill(-1);
+  seedSet.forEach(i => g[i] = 0);
+  let wave = 0;
+  while (true){
+    const add = [];
+    for (let i=0;i<cells.length;i++){
+      if (g[i] !== -1) continue;
+      let k = 0; for (const j of nbrs[i]) if (g[j] !== -1) k++;
+      if (k >= 3) add.push(i);
+    }
+    if (!add.length) break;
+    wave++; add.forEach(i => g[i] = wave);
+  }
+  return {g, waves: wave};
+}
+
+// SVG build
+const svg = document.getElementById("svg"), NS = "http://www.w3.org/2000/svg";
+const W = SQ3*SIZE*(2*R+1) + 8, H = SIZE*(1.5*(2*R)+2) + 8;
+svg.setAttribute("viewBox", `${-W/2} ${-H/2} ${W} ${H}`);
+const pts = [...Array(6)].map((_,k)=>{const a=Math.PI/180*(60*k-30);return [SIZE*0.95*Math.cos(a), SIZE*0.95*Math.sin(a)]});
+const polys = [], labels = [];
+cells.forEach((c,i) => {
+  const x = SIZE*SQ3*(c.q + c.r/2), y = SIZE*1.5*c.r;
+  const p = document.createElementNS(NS,"polygon");
+  p.setAttribute("points", pts.map(([a,b])=>`${(x+a).toFixed(2)},${(y+b).toFixed(2)}`).join(" "));
+  p.setAttribute("class","cell"); p.setAttribute("tabindex","0"); p.setAttribute("role","gridcell");
+  p.addEventListener("click", () => toggle(i));
+  p.addEventListener("keydown", e => { if (e.key==="Enter"||e.key===" "){ e.preventDefault(); toggle(i);} });
+  p.addEventListener("mouseenter", () => preview(i));
+  p.addEventListener("mouseleave", clearPreview);
+  svg.appendChild(p); polys.push(p);
+  const t = document.createElementNS(NS,"text");
+  t.setAttribute("x",x); t.setAttribute("y",y); t.setAttribute("class","gen");
+  svg.appendChild(t); labels.push(t);
+});
+
+function toggle(i){
+  if (gen[i] > 0){ polys[i].classList.remove("nope"); void polys[i].getBBox(); polys[i].classList.add("nope"); return; }
+  history.push(new Set(seeds));
+  seeds.has(i) ? seeds.delete(i) : seeds.add(i);
+  render(); preview(i);
+}
+
+function render(){
+  const {g, waves} = closure(seeds);
+  prevGen = gen; gen = g;
+  const showGen = document.getElementById("showGen").checked;
+  let nSeed=0, nAuto=0;
+  cells.forEach((_,i) => {
+    const p = polys[i], was = prevGen[i], now = g[i];
+    p.classList.toggle("seed", now===0);
+    p.classList.toggle("auto", now>0);
+    if (now===0) nSeed++; else if (now>0) nAuto++;
+    if (now>=0 && was===-1){
+      p.classList.remove("pop"); void p.getBBox();
+      p.style.animationDelay = now>0 ? (now*70)+"ms" : "0ms";
+      p.style.transitionDelay = now>0 ? (now*70)+"ms" : "0ms";
+      p.classList.add("pop");
+    } else { p.style.transitionDelay = "0ms"; }
+    labels[i].textContent = showGen && now>0 ? now : "";
+    p.setAttribute("aria-label", `Cell ${cells[i].q},${cells[i].r}: ${now===0?"filled by you":now>0?"auto-filled":"empty"}`);
+  });
+  document.getElementById("sFill").textContent = nSeed+nAuto;
+  document.getElementById("sSeed").textContent = nSeed;
+  document.getElementById("sAuto").textContent = nAuto;
+  document.getElementById("sGen").textContent = waves;
+}
+
+function preview(i){
+  clearPreview();
+  if (gen[i] !== -1) return;
+  const s = new Set(seeds); s.add(i);
+  const {g} = closure(s);
+  g.forEach((v,j) => { if (v>0 && gen[j]===-1) polys[j].classList.add("hint"); });
+}
+function clearPreview(){ polys.forEach(p => p.classList.remove("hint")); }
+
+document.getElementById("clear").onclick = () => { history.push(new Set(seeds)); seeds.clear(); render(); };
+document.getElementById("undo").onclick = () => { if (history.length){ seeds = history.pop(); render(); } };
+document.getElementById("rand").onclick = () => {
+  history.push(new Set(seeds)); seeds.clear();
+  const pool = cells.map((_,i)=>i);
+  for (let k=0;k<25;k++){ const j = Math.floor(Math.random()*pool.length); seeds.add(pool.splice(j,1)[0]); }
+  render();
+};
+document.getElementById("showGen").onchange = render;
+
+// Starting example: three cells around one empty cell, so the rule is visible right away
+[idx.get("0,-1"), idx.get("1,0"), idx.get("-1,1")].forEach(i => seeds.add(i));
+render();
+</script>

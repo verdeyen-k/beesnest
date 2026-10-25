@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bees Nest</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#eef0ec; --panel:#e2e6df; --line:#b9c0b4; --ink:#1f2622; --muted:#5d675f; --empty:#f8f9f6; --accent:#d08a2c;
+  --display:"Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#161a18; --panel:#1f2522; --line:#3a433d; --ink:#e7ebe6; --muted:#97a29a; --empty:#2a322d; --accent:#e2a14a; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#161a18; --panel:#1f2522; --line:#3a433d; --ink:#e7ebe6; --muted:#97a29a; --empty:#2a322d; --accent:#e2a14a; color-scheme:dark }
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--display)}
+[hidden]{display:none !important}
+.wrap{max-width:900px;margin:0 auto;padding:24px 16px 40px;display:flex;flex-direction:column;gap:16px}
+h1{font-size:clamp(28px,6vw,40px);font-weight:700;margin:0;letter-spacing:-.02em}
+h2{font-size:20px;margin:0}
+p{margin:0;line-height:1.5}
+.muted{color:var(--muted);font-size:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+input[type=number]{font:500 16px var(--mono);background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:5.5em}
+input:disabled{opacity:.7}
+.sw.gray{background:#8e948f}
+input[type=text]{font:500 16px var(--display);background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 12px;min-width:0}
+#join-code{width:7em;text-transform:uppercase;font-family:var(--mono);letter-spacing:.15em}
+button{font:500 15px var(--display);background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 16px;cursor:pointer}
+button:hover{border-color:var(--ink)}
+button.big{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+button:disabled{opacity:.5;cursor:default}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.seg{gap:6px}
+.seg button{min-width:44px}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.names{display:flex;flex-direction:column;gap:8px}
+.names input{flex:1;max-width:260px}
+.error{color:#c43c3c;min-height:1.5em;font-size:14px}
+ul.plain{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+ul.plain li{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sw{display:inline-block;width:14px;height:14px;border-radius:3px}
+.sw + .sw{margin-left:-6px}
+.pname{font-weight:700}
+.code{font:500 34px var(--mono);letter-spacing:.2em}
+
+.top{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+#turn{font-weight:700;font-size:18px;padding:6px 14px;border-radius:999px;background:var(--line);color:#fff}
+#turn.mine{animation:glow 1.4s ease-in-out infinite}
+@keyframes glow{50%{box-shadow:0 0 0 5px color-mix(in srgb, var(--accent) 45%, transparent)}}
+.top .spacer{flex:1}
+table{border-collapse:collapse;font-size:14px;width:100%}
+th{font-weight:500;color:var(--muted);text-align:right;padding:2px 8px}
+th:first-child{text-align:left}
+td{padding:5px 8px;border-top:1px solid var(--line)}
+td .sw{vertical-align:-2px}
+td .pname{margin-left:6px}
+td.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+td.pts{font-weight:500;font-size:16px}
+tr.now td{background:color-mix(in srgb, var(--accent) 14%, transparent)}
+.board{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px}
+svg{display:block;width:100%;height:auto;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+.cell{cursor:pointer;stroke:var(--line);stroke-width:1.2;fill:var(--empty);
+  transition:fill .18s ease;transform-box:fill-box;transform-origin:center}
+.cell:hover{stroke:var(--ink)}
+.cell.filled{cursor:not-allowed}
+.cell.last{stroke:var(--ink) !important;stroke-width:2.6}
+.cell.hint{stroke:var(--hint) !important;stroke-width:2.6;stroke-dasharray:4 3}
+.cell.picked{stroke:var(--hint) !important;stroke-width:3.5}
+.cell.pop{animation:pop .32s ease both}
+.cell.nope{animation:nope .3s ease}
+.cell:focus{outline:none}
+.cell:focus-visible{stroke:var(--ink);stroke-width:3}
+.dot{fill:#fff;opacity:.85;pointer-events:none}
+@keyframes pop{0%{transform:scale(.55)}70%{transform:scale(1.08)}100%{transform:scale(1)}}
+@keyframes nope{25%{transform:translateX(-2px)}75%{transform:translateX(2px)}}
+@media (prefers-reduced-motion: reduce){ .cell.pop,.cell.nope,#turn.mine{animation:none} .cell{transition:none} }
+#hint{min-height:1.5em;font-size:14px;color:var(--muted)}
+
+#over{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:16px}
+#over .card{background:var(--bg);max-width:440px;width:100%}
+#winner{font-size:28px}
+</style>
+</head>
+<body>
+
+<section class="screen wrap" id="menu">
+  <h1>🐝 Bees Nest</h1>
+  <p class="muted">Take turns filling cells of the hive. Any empty cell touching 3 or more filled cells fills itself, and that can set off a chain.
+    Cells that fill themselves are yours if your click set them off.</p>
+  <div class="card">
+    <h2>Points</h2>
+    <p>Your points = cells that filled themselves for you, minus cells you clicked. When the hive is full, whoever has the most points wins.</p>
+    <p class="muted">You can also scatter gray hexes at the start. They belong to nobody, but they count as filled, so they help set off chains.</p>
+    <ul class="plain" id="pairs"></ul>
+  </div>
+  <div class="card">
+    <h2>Play on this device</h2>
+    <div class="row"><span>Players</span><span class="row seg" id="local-count"></span></div>
+    <div id="local-names" class="names"></div>
+    <div class="row"><span class="sw gray"></span><label for="local-grays">Gray hexes to scatter</label><input type="number" id="local-grays" min="0" value="0" inputmode="numeric"></div>
+    <div class="row"><button class="big" id="local-start" type="button">Start</button></div>
+  </div>
+  <div class="card">
+    <h2>Play on separate devices</h2>
+    <div class="row"><label for="name">Your name</label><input type="text" id="name" maxlength="16" autocomplete="nickname"></div>
+    <div class="row"><button class="big" id="create" type="button">Create a room</button></div>
+    <div class="row"><input type="text" id="join-code" maxlength="4" placeholder="CODE" autocomplete="off" aria-label="Room code"><button id="join" type="button">Join</button></div>
+    <p class="error" id="menu-error"></p>
+  </div>
+</section>
+
+<section class="screen wrap" id="lobby" hidden>
+  <h1>🐝 Bees Nest</h1>
+  <div class="card">
+    <p class="muted">Room code: friends type this on their own device to join (up to 4 players).</p>
+    <div class="code" id="code"></div>
+  </div>
+  <div class="card">
+    <h2>Players</h2>
+    <ul class="plain" id="lobby-players"></ul>
+  </div>
+  <div class="card">
+    <div class="row"><span class="sw gray"></span><label for="grays">Gray hexes to scatter</label><input type="number" id="grays" min="0" value="0" inputmode="numeric"></div>
+    <p class="muted">Gray hexes are placed at random when the game starts. They belong to nobody, but they count as filled, so they help set off chains.</p>
+  </div>
+  <div class="row">
+    <button class="big" id="start" type="button">Start</button>
+    <span class="muted" id="lobby-wait">Waiting for the host to start…</span>
+    <button id="lobby-leave" type="button">Leave</button>
+  </div>
+</section>
+
+<section class="screen wrap" id="game" hidden>
+  <div class="top">
+    <span id="turn"></span>
+    <span class="muted" id="left"></span>
+    <span class="spacer"></span>
+    <span class="muted" id="game-room">Room <b id="game-code"></b></span>
+    <button id="game-leave" type="button">Leave</button>
+  </div>
+  <table>
+    <thead><tr><th>Player</th><th>auto</th><th>clicked</th><th>points</th></tr></thead>
+    <tbody id="scores"></tbody>
+  </table>
+  <div class="board"><svg id="svg" role="grid" aria-label="Hive"></svg></div>
+  <p id="hint"></p>
+  <p class="muted">On your turn, hover (or tap once) on an empty cell to see what it would set off, then click (or tap again) to place it.
+    Cells with a dot were clicked; the outlined one is the latest move.</p>
+</section>
+
+<div id="over" hidden>
+  <div class="card">
+    <h2 id="winner"></h2>
+    <ul class="plain" id="final"></ul>
+    <div class="row">
+      <button class="big" id="again" type="button">Play again</button>
+      <span class="muted" id="again-wait">Waiting for the host…</span>
+      <button id="over-leave" type="button">Leave</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="beesnest.js?v=3"></script>
+</body>
+</html>
